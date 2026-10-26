@@ -1,0 +1,408 @@
+templates/resume.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <div class="container nav">
+            <h1>Resume Manager</h1>
+            <nav>
+                <a href="{{ url_for('index') }}">Dashboard</a>
+                <a href="{{ url_for('resume_dashboard') }}">Resume</a>
+                <a href="{{ url_for('jobs_page') }}">Jobs</a>
+                <a href="{{ url_for('applications_page') }}">Applications</a>
+                <a href="{{ url_for('settings_page') }}">Automation</a>
+            </nav>
+        </div>
+    </header>
+    <main class="container main">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+            <div class="alert-box">
+                {{ messages[0] }}
+            </div>
+            {% endif %}
+        {% endwith %}
+
+        <section class="card">
+            <h3>Upload resume</h3>
+            <form method="POST" enctype="multipart/form-data">
+                <div class="form-grid">
+                    <label>Resume file
+                        <input type="file" name="resume_upload" accept=".pdf,.docx" />
+                    </label>
+                    <button type="submit">Upload and parse</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card">
+            <h3>Profile details</h3>
+            <form method="POST">
+                <div class="form-grid">
+                    <label>Full name<input type="text" name="full_name" value="{{ profile.full_name or '' }}"></label>
+                    <label>Email<input type="email" name="email" value="{{ profile.email or '' }}"></label>
+                    <label>Phone<input type="text" name="phone" value="{{ profile.phone or '' }}"></label>
+                    <label>Location<input type="text" name="location" value="{{ profile.location or '' }}"></label>
+                    <label>Title<input type="text" name="title" value="{{ profile.title or '' }}"></label>
+                    <label>Website<input type="text" name="website" value="{{ profile.website or '' }}"></label>
+                    <label class="wide">Summary<textarea name="summary">{{ profile.summary or '' }}</textarea></label>
+                    <label class="wide">Skills<textarea name="skills">{{ profile.skills or '' }}</textarea></label>
+                    <label class="wide">Experience<textarea name="experience">{{ profile.experience or '' }}</textarea></label>
+                    <label class="wide">Education<textarea name="education">{{ profile.education or '' }}</textarea></label>
+                    <label class="wide">Projects<textarea name="projects">{{ profile.projects or '' }}</textarea></label>
+                    <label class="wide">Preferences<textarea name="preferences">{{ profile.preferences or '' }}</textarea></label>
+                </div>
+                <button type="submit">Save profile</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

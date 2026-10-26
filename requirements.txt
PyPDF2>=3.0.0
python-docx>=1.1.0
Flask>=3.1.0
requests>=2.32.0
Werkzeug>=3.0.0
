@@ -1,0 +1,751 @@
+from flask import Flask, render_template, request, redirect, url_for, flash
+from werkzeug.utils import secure_filename
+import sqlite3
+import os
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
+
+try:
+    from PyPDF2 import PdfReader
+except ImportError:  # pragma: no cover
+    PdfReader = None
+
+try:
+    from docx import Document as DocxDocument
+except ImportError:  # pragma: no cover
+    DocxDocument = None
+
+try:
+    import requests
+except ImportError:  # pragma: no cover
+    requests = None
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "job_app_tracker.db"
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+SKILL_KEYWORDS = {
+    "python", "flask", "sql", "sqlite", "javascript", "html", "css", "bootstrap",
+    "react", "node", "express", "django", "postgresql", "mysql", "mongodb",
+    "aws", "azure", "docker", "kubernetes", "ci/cd", "testing", "pytest",
+    "machine learning", "data analysis", "excel", "power bi", "tableau",
+    "product management", "agile", "project management", "customer success",
+    "data engineering", "etl", "pandas", "numpy", "tensorflow", "pytorch",
+    "java", "c#", "go", "rust", "spark", "airflow", "git", "linux",
+    "ui/ux", "figma", "seo", "sales", "business development", "communication",
+    "api", "rest", "graphql", "microservices", "devops", "cybersecurity"
+}
+
+EXPERIENCE_TIER_MAP = {
+    "entry": 1,
+    "junior": 2,
+    "mid": 3,
+    "senior": 5,
+    "lead": 7,
+}
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def normalize_text(value):
+    if not value:
+        return ""
+    value = value.lower()
+    value = value.replace("&", " and ")
+    value = re.sub(r"[^a-z0-9+/\-\s]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def parse_keywords(text):
+    normalized = normalize_text(text)
+    matches = []
+    for skill in sorted(SKILL_KEYWORDS, key=len, reverse=True):
+        if skill in normalized:
+            matches.append(skill)
+    return sorted(set(matches))
+
+
+def extract_text_from_pdf(path):
+    if PdfReader is None:
+        return ""
+    reader = PdfReader(str(path))
+    chunks = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        chunks.append(text)
+    return "\n".join(chunks)
+
+
+def extract_text_from_docx(path):
+    if DocxDocument is None:
+        return ""
+    doc = DocxDocument(str(path))
+    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+    return "\n".join(paragraphs)
+
+
+def extract_resume_text(file_path):
+    ext = Path(file_path).suffix.lower()
+    if ext == ".pdf":
+        return extract_text_from_pdf(file_path)
+    if ext == ".docx":
+        return extract_text_from_docx(file_path)
+    try:
+        return Path(file_path).read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def parse_resume_text(text):
+    text = text or ""
+    profile = {
+        "full_name": "",
+        "email": "",
+        "phone": "",
+        "location": "",
+        "title": "",
+        "summary": text[:1200],
+        "experience": "",
+        "education": "",
+        "projects": "",
+        "skills": ", ".join(parse_keywords(text)[:15]),
+    }
+
+    for pattern_key, label in [
+        (r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+", "full_name"),
+        (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "email"),
+        (r"\+?[0-9()\-\s]{7,}", "phone"),
+    ]:
+        match = re.search(pattern_key, text)
+        if match and label in profile and not profile[label]:
+            profile[label] = match.group(0).strip()
+
+    if not profile["title"]:
+        profile["title"] = "Professional"
+
+    return profile
+
+
+def ensure_defaults():
+    conn = get_db()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS resume_profile (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT,
+            email TEXT,
+            phone TEXT,
+            location TEXT,
+            title TEXT,
+            summary TEXT,
+            skills TEXT,
+            experience TEXT,
+            education TEXT,
+            projects TEXT,
+            website TEXT,
+            preferences TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            company TEXT,
+            location TEXT,
+            remote_type TEXT,
+            experience_level TEXT,
+            employment_type TEXT,
+            salary TEXT,
+            description TEXT,
+            requirements TEXT,
+            application_url TEXT,
+            source TEXT,
+            is_sample INTEGER DEFAULT 0,
+            posted_date TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER,
+            mode TEXT,
+            status TEXT,
+            submitted_at TEXT,
+            notes TEXT,
+            cover_letter TEXT,
+            resume_used TEXT,
+            company TEXT,
+            title TEXT,
+            FOREIGN KEY(job_id) REFERENCES jobs(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auto_apply_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            enabled INTEGER DEFAULT 0,
+            allowed_platforms TEXT,
+            require_confirmation INTEGER DEFAULT 1,
+            updated_at TEXT
+        )
+        """
+    )
+
+    resume_count = conn.execute("SELECT COUNT(*) FROM resume_profile").fetchone()[0]
+    if resume_count == 0:
+        profile = {
+            "full_name": "Alex Morgan",
+            "email": "alex.morgan@example.com",
+            "phone": "+1 (415) 867-5309",
+            "location": "Remote, US",
+            "title": "Senior Python Developer",
+            "summary": "Experienced Python engineer focused on backend automation, AI workflows, and scalable application delivery.",
+            "skills": "Python, Flask, SQLite, JavaScript, HTML, CSS, SQL, API design, Docker, CI/CD, Machine Learning",
+            "experience": "Senior Python Developer | 6 years building automation and full-stack web applications.\nPython Engineer | Designed APIs and workflow automation for SaaS products.",
+            "education": "B.S. Computer Science",
+            "projects": "Built internal AI-powered workflow tools and dashboard systems to streamline operations.",
+            "website": "",
+            "preferences": "Remote roles, Python ecosystems, product-focused teams, AI and automation",
+        }
+        conn.execute(
+            "INSERT INTO resume_profile (full_name, email, phone, location, title, summary, skills, experience, education, projects, website, preferences, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                profile["full_name"],
+                profile["email"],
+                profile["phone"],
+                profile["location"],
+                profile["title"],
+                profile["summary"],
+                profile["skills"],
+                profile["experience"],
+                profile["education"],
+                profile["projects"],
+                profile["website"],
+                profile["preferences"],
+                datetime.utcnow().isoformat(),
+            ),
+        )
+
+    jobs_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    if jobs_count == 0:
+        sample_jobs = [
+            {
+                "title": "Senior Python Developer",
+                "company": "Northstar Labs",
+                "location": "Remote",
+                "remote_type": "Remote",
+                "experience_level": "Senior",
+                "employment_type": "Full-time",
+                "salary": "$130k - $170k",
+                "description": "Build backend services, workflow automation, and AI integrations for a product team focused on data processing and decision support.",
+                "requirements": "Python, Flask, SQL, REST APIs, Docker, CI/CD, teamwork, automation",
+                "application_url": "https://example.com/jobs/northstar-python",
+                "source": "Sample Data",
+                "is_sample": 1,
+                "posted_date": "2026-10-10",
+            },
+            {
+                "title": "AI Product Analyst",
+                "company": "SignalForge",
+                "location": "New York, NY",
+                "remote_type": "Hybrid",
+                "experience_level": "Mid",
+                "employment_type": "Full-time",
+                "salary": "$110k - $145k",
+                "description": "Analyze product usage, model impact, and internal automation opportunities while collaborating with engineering and operations teams.",
+                "requirements": "Python, SQL, data analysis, machine learning, communication, product management",
+                "application_url": "https://example.com/jobs/signalforge-ai-analyst",
+                "source": "Sample Data",
+                "is_sample": 1,
+                "posted_date": "2026-10-12",
+            },
+            {
+                "title": "Full-Stack Software Engineer",
+                "company": "Harbor Cloud",
+                "location": "San Francisco, CA",
+                "remote_type": "Office",
+                "experience_level": "Senior",
+                "employment_type": "Full-time",
+                "salary": "$140k - $185k",
+                "description": "Design and build internal tools, dashboards, and service APIs using modern web and backend technologies.",
+                "requirements": "JavaScript, HTML, CSS, Python, Flask, React, API design, SQL",
+                "application_url": "https://example.com/jobs/harbor-cloud-fullstack",
+                "source": "Sample Data",
+                "is_sample": 1,
+                "posted_date": "2026-10-08",
+            },
+            {
+                "title": "Data Engineer",
+                "company": "Crest Analytics",
+                "location": "Remote",
+                "remote_type": "Remote",
+                "experience_level": "Mid",
+                "employment_type": "Contract",
+                "salary": "$90k - $130k",
+                "description": "Build ETL flows, data pipelines, and reporting infrastructure for operational analytics and business intelligence programs.",
+                "requirements": "Python, SQL, ETL, Spark, Airflow, data engineering, warehouse design",
+                "application_url": "https://example.com/jobs/crest-data-engineer",
+                "source": "Sample Data",
+                "is_sample": 1,
+                "posted_date": "2026-10-05",
+            },
+        ]
+        for job in sample_jobs:
+            conn.execute(
+                "INSERT INTO jobs (title, company, location, remote_type, experience_level, employment_type, salary, description, requirements, application_url, source, is_sample, posted_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    job["title"],
+                    job["company"],
+                    job["location"],
+                    job["remote_type"],
+                    job["experience_level"],
+                    job["employment_type"],
+                    job["salary"],
+                    job["description"],
+                    job["requirements"],
+                    job["application_url"],
+                    job["source"],
+                    job["is_sample"],
+                    job["posted_date"],
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+
+    settings_count = conn.execute("SELECT COUNT(*) FROM auto_apply_settings").fetchone()[0]
+    if settings_count == 0:
+        conn.execute(
+            "INSERT INTO auto_apply_settings (enabled, allowed_platforms, require_confirmation, updated_at) VALUES (?, ?, ?, ?)",
+            (0, "", 1, datetime.utcnow().isoformat()),
+        )
+
+    conn.commit()
+    conn.close()
+
+
+def fetch_profile():
+    conn = get_db()
+    row = conn.execute("SELECT * FROM resume_profile ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    if not row:
+        return {}
+    return dict(row)
+
+
+def fetch_jobs(filters=None):
+    conn = get_db()
+    query = "SELECT * FROM jobs WHERE 1=1"
+    params = []
+    if filters:
+        if filters.get("title"):
+            query += " AND LOWER(title) LIKE ?"
+            params.append(f"%{filters['title'].lower()}%")
+        if filters.get("skills"):
+            query += " AND (LOWER(requirements) LIKE ? OR LOWER(description) LIKE ?)"
+            skill_pattern = f"%{filters['skills'].lower()}%"
+            params.extend([skill_pattern, skill_pattern])
+        if filters.get("location"):
+            query += " AND LOWER(location) LIKE ?"
+            params.append(f"%{filters['location'].lower()}%")
+        if filters.get("remote_type"):
+            query += " AND LOWER(remote_type) = ?"
+            params.append(filters["remote_type"].lower())
+        if filters.get("experience_level"):
+            query += " AND LOWER(experience_level) = ?"
+            params.append(filters["experience_level"].lower())
+        if filters.get("employment_type"):
+            query += " AND LOWER(employment_type) = ?"
+            params.append(filters["employment_type"].lower())
+        if filters.get("company"):
+            query += " AND LOWER(company) LIKE ?"
+            params.append(f"%{filters['company'].lower()}%")
+    query += " ORDER BY posted_date DESC, created_at DESC"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def job_record(job_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def compute_match(profile, job):
+    profile_skills = set(normalize_text(profile.get("skills", "")).split())
+    job_text = f"{job.get('title', '')} {job.get('description', '')} {job.get('requirements', '')}"
+    job_terms = set(parse_keywords(job_text))
+    resume_keywords = set(parse_keywords(profile.get("summary", "") + " " + profile.get("skills", "") + " " + profile.get("experience", "") + " " + profile.get("projects", "")))
+
+    matching_skills = sorted(skill for skill in job_terms if skill in resume_keywords)
+    missing_skills = sorted(skill for skill in job_terms if skill not in resume_keywords)
+
+    location_match = 10 if profile.get("location", "").lower() in (job.get("location", "").lower()) or "remote" in job.get("location", "").lower() and "remote" in profile.get("location", "").lower() else 0
+    skill_overlap = len(matching_skills) / max(1, len(job_terms)) if job_terms else 0
+    base_score = int(round(35 + (skill_overlap * 50) + location_match + (10 if job.get("remote_type") == "Remote" else 0)))
+    score = max(0, min(100, base_score))
+
+    reasons = []
+    if matching_skills:
+        reasons.append(f"Your profile contains relevant experience for {job.get('title', 'this role')}, including {', '.join(matching_skills[:3])}.")
+    if job.get("experience_level", "").lower() in ("senior", "lead"):
+        reasons.append("The role aligns with senior-level technical or strategic responsibilities.")
+    else:
+        reasons.append("The role matches a practical skill set suitable for an intermediate-level contributor.")
+
+    if profile.get("location", "").lower() and job.get("location", "").lower():
+        reasons.append(f"The location and work arrangement are compatible with your stated preferences in {profile.get('location', 'your profile')}.")
+
+    improvements = []
+    if missing_skills:
+        improvements.append(f"Add or verify experience in: {', '.join(missing_skills[:3])}.")
+    improvements.append("Highlight concrete outcomes and measurable achievements in your resume to strengthen match strength.")
+    improvements.append("Tailor your summary and project bullets to reference the role's core tools and responsibilities.")
+
+    return {
+        "score": score,
+        "matching_skills": matching_skills,
+        "missing_skills": missing_skills,
+        "reasons": reasons,
+        "improvements": improvements,
+    }
+
+
+def fallback_ai_text(prompt):
+    summary = "Based on your profile and the job details, emphasize relevant strengths and present a clear, qualified application summary."
+    if "cover letter" in prompt.lower():
+        return "Dear Hiring Manager, I am excited to apply for this opportunity and would welcome the chance to contribute my background in Python, automation, and product-focused problem solving."
+    return summary
+
+
+def get_llm_response(prompt):
+    provider = os.environ.get("LLM_PROVIDER", "fallback").lower()
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("GEMINI_API_KEY") or None
+
+    if provider == "openai" and api_key and requests is not None:
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.35,
+                },
+                timeout=30,
+            )
+            if response.ok:
+                data = response.json()
+                return data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            pass
+
+    if provider == "gemini" and api_key and requests is not None:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+            response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
+            if response.ok:
+                data = response.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except Exception:
+            pass
+
+    return fallback_ai_text(prompt)
+
+
+def build_cover_letter(profile, job):
+    profile_name = profile.get("full_name") or "Candidate"
+    company = job.get("company", "the company")
+    role = job.get("title", "the role")
+    summary = profile.get("summary", "")
+    skills = (profile.get("skills") or "")
+    letter = f"Dear Hiring Manager,\n\nI am writing to express my interest in the {role} position at {company}. With a background in Python-driven development, workflow automation, and product-focused engineering, I am confident I can contribute meaningfully to your team.\n\nMy experience includes building practical software solutions, integrating APIs, and improving operational workflows through tools and dashboards. I bring strong strengths in {skills[:200]} and a track record of creating reliable, maintainable systems.\n\n{summary[:500]}\n\nI would welcome the opportunity to discuss how my background aligns with the needs of your team and how I can contribute to your goals. Thank you for your consideration.\n\nSincerely,\n{profile_name}"
+    return letter
+
+
+def get_auto_apply_settings():
+    conn = get_db()
+    row = conn.execute("SELECT * FROM auto_apply_settings ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    if row is None:
+        return {"enabled": 0, "allowed_platforms": "", "require_confirmation": 1}
+    return dict(row)
+
+
+def save_auto_apply_settings(enabled, allowed_platforms, require_confirmation):
+    conn = get_db()
+    conn.execute(
+        "UPDATE auto_apply_settings SET enabled = ?, allowed_platforms = ?, require_confirmation = ?, updated_at = ? WHERE id = (SELECT id FROM auto_apply_settings ORDER BY id DESC LIMIT 1)",
+        (int(enabled), allowed_platforms, int(require_confirmation), datetime.utcnow().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def track_application(job_id, mode, status, notes, cover_letter, company, title):
+    now = datetime.utcnow().isoformat()
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO applications (job_id, mode, status, submitted_at, notes, cover_letter, resume_used, company, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (job_id, mode, status, now, notes, cover_letter, "Resume upload + profile", company, title),
+    )
+    conn.commit()
+    conn.close()
+
+
+@app.route("/")
+def index():
+    ensure_defaults()
+    profile = fetch_profile()
+    jobs = fetch_jobs()
+    applications = fetch_application_records()
+    settings = get_auto_apply_settings()
+
+    score_values = []
+    for job in jobs[:5]:
+        match = compute_match(profile, job)
+        score_values.append(match["score"])
+
+    avg_score = round(sum(score_values) / len(score_values), 1) if score_values else 0
+    return render_template(
+        "index.html",
+        profile=profile,
+        jobs=jobs[:5],
+        applications=applications[:5],
+        average_score=avg_score,
+        settings=settings,
+    )
+
+
+@app.route("/resume", methods=["GET", "POST"])
+def resume_dashboard():
+    profile = fetch_profile()
+    if request.method == "POST":
+        file = request.files.get("resume_upload")
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            save_path = UPLOAD_DIR / filename
+            file.save(save_path)
+            text = extract_resume_text(str(save_path))
+            parsed = parse_resume_text(text)
+            for key, value in parsed.items():
+                if value and key in profile:
+                    profile[key] = value
+
+        update = {
+            "full_name": request.form.get("full_name", profile.get("full_name", "")),
+            "email": request.form.get("email", profile.get("email", "")),
+            "phone": request.form.get("phone", profile.get("phone", "")),
+            "location": request.form.get("location", profile.get("location", "")),
+            "title": request.form.get("title", profile.get("title", "")),
+            "summary": request.form.get("summary", profile.get("summary", "")),
+            "skills": request.form.get("skills", profile.get("skills", "")),
+            "experience": request.form.get("experience", profile.get("experience", "")),
+            "education": request.form.get("education", profile.get("education", "")),
+            "projects": request.form.get("projects", profile.get("projects", "")),
+            "website": request.form.get("website", profile.get("website", "")),
+            "preferences": request.form.get("preferences", profile.get("preferences", "")),
+        }
+        conn = get_db()
+        conn.execute(
+            "UPDATE resume_profile SET full_name = ?, email = ?, phone = ?, location = ?, title = ?, summary = ?, skills = ?, experience = ?, education = ?, projects = ?, website = ?, preferences = ?, updated_at = ? WHERE id = (SELECT id FROM resume_profile ORDER BY id DESC LIMIT 1)",
+            (
+                update["full_name"],
+                update["email"],
+                update["phone"],
+                update["location"],
+                update["title"],
+                update["summary"],
+                update["skills"],
+                update["experience"],
+                update["education"],
+                update["projects"],
+                update["website"],
+                update["preferences"],
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        profile = fetch_profile()
+        flash("Resume profile updated successfully.", "success")
+
+    return render_template("resume.html", profile=profile)
+
+
+@app.route("/jobs", methods=["GET", "POST"])
+def jobs_page():
+    profile = fetch_profile()
+    filters = {
+        "title": request.args.get("title") or "",
+        "skills": request.args.get("skills") or "",
+        "location": request.args.get("location") or "",
+        "remote_type": request.args.get("remote_type") or "",
+        "experience_level": request.args.get("experience_level") or "",
+        "employment_type": request.args.get("employment_type") or "",
+        "company": request.args.get("company") or "",
+    }
+    if request.method == "POST":
+        manual = {
+            "title": request.form.get("title", "").strip(),
+            "company": request.form.get("company", "").strip(),
+            "location": request.form.get("location", "").strip(),
+            "remote_type": request.form.get("remote_type", "Remote"),
+            "experience_level": request.form.get("experience_level", "Mid"),
+            "employment_type": request.form.get("employment_type", "Full-time"),
+            "salary": request.form.get("salary", "").strip(),
+            "description": request.form.get("description", "").strip(),
+            "requirements": request.form.get("requirements", "").strip(),
+            "application_url": request.form.get("application_url", "").strip(),
+        }
+        if manual["title"] and manual["company"]:
+            conn = get_db()
+            conn.execute(
+                "INSERT INTO jobs (title, company, location, remote_type, experience_level, employment_type, salary, description, requirements, application_url, source, is_sample, posted_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    manual["title"],
+                    manual["company"],
+                    manual["location"],
+                    manual["remote_type"],
+                    manual["experience_level"],
+                    manual["employment_type"],
+                    manual["salary"],
+                    manual["description"],
+                    manual["requirements"],
+                    manual["application_url"],
+                    "Manual Entry",
+                    0,
+                    datetime.utcnow().date().isoformat(),
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+            conn.commit()
+            conn.close()
+            flash("Job added successfully.", "success")
+        else:
+            flash("Job title and company are required.", "error")
+        return redirect(url_for("jobs_page"))
+
+    job_rows = fetch_jobs(filters)
+    scored_jobs = []
+    for job in job_rows:
+        match = compute_match(profile, job)
+        scored_jobs.append({**job, **{"match": match}})
+
+    return render_template("jobs.html", jobs=scored_jobs, filters=filters)
+
+
+@app.route("/job/<int:job_id>")
+def job_detail(job_id):
+    profile = fetch_profile()
+    job = job_record(job_id)
+    if not job:
+        flash("Job not found.", "error")
+        return redirect(url_for("jobs_page"))
+    match = compute_match(profile, job)
+    cover_letter = build_cover_letter(profile, job)
+    settings = get_auto_apply_settings()
+    return render_template(
+        "job_detail.html",
+        job=job,
+        match=match,
+        cover_letter=cover_letter,
+        settings=settings,
+    )
+
+
+@app.route("/job/<int:job_id>/apply", methods=["POST"])
+def apply_to_job(job_id):
+    profile = fetch_profile()
+    job = job_record(job_id)
+    if not job:
+        flash("Job not found.", "error")
+        return redirect(url_for("jobs_page"))
+
+    mode = request.form.get("mode", "manual")
+    cover_letter = build_cover_letter(profile, job)
+    match = compute_match(profile, job)
+
+    if mode == "manual":
+        notes = "Manual application opened; user reviews listing and applies through the official portal."
+        status = "Opened"
+    elif mode == "assisted":
+        notes = "Assisted mode prepared candidate profile for review before final submission."
+        status = "Prepared"
+    else:
+        settings = get_auto_apply_settings()
+        if not settings.get("enabled"):
+            flash("Authorized auto apply is disabled. Use assisted or manual mode.", "error")
+            return redirect(url_for("job_detail", job_id=job_id))
+        notes = "Authorized auto-apply was enabled and the application was queued for permitted platform submission."
+        status = "Authorized Auto Submit"
+
+    track_application(job_id, mode, status, notes, cover_letter, job.get("company", ""), job.get("title", ""))
+    flash(f"Application recorded in {mode} mode.", "success")
+    return redirect(url_for("applications_page"))
+
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings_page():
+    if request.method == "POST":
+        enabled = bool(request.form.get("enabled"))
+        allowed_platforms = request.form.get("allowed_platforms", "")
+        require_confirmation = bool(request.form.get("require_confirmation"))
+        save_auto_apply_settings(enabled, allowed_platforms, require_confirmation)
+        flash("Automation settings updated.", "success")
+        return redirect(url_for("settings_page"))
+
+    settings = get_auto_apply_settings()
+    return render_template("settings.html", settings=settings)
+
+
+@app.route("/applications")
+def applications_page():
+    rows = fetch_application_records()
+    return render_template("applications.html", applications=rows)
+
+
+def fetch_application_records():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT a.*, j.title AS job_title, j.company AS job_company FROM applications a LEFT JOIN jobs j ON a.job_id = j.id ORDER BY a.submitted_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template("404.html"), 404
+
+
+if __name__ == "__main__":
+    ensure_defaults()
+    app.run(debug=True, host="0.0.0.0", port=5000)
+
+
+path = "templates" 

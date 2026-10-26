@@ -1,0 +1,57 @@
+# AI-Powered Auto Job Application System
+
+This project is a Flask-based job search and application tracker that helps you:
+
+- upload and manage a resume
+- search sample and manually added jobs
+- compute job compatibility scores against your profile
+- generate cover letters and targeted resume bullet suggestions
+- track applications and manage a safe automation configuration
+
+## Features
+
+- Resume upload for PDF and DOCX files
+- Skill extraction with keyword-based fallback matching
+- Score logic for job compatibility using skills, location, and role fit
+- Manual job listing creation and filtered job search
+- Cover letter generation with professional fallback text
+- Application tracking and dashboard views
+- Configurable automatic-apply rules that remain permission-aware and off by default
+
+## Run locally
+
+1. Create a virtual environment and install dependencies:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+2. Start the Flask app:
+   ```bash
+   flask --app app run --debug
+   ```
+
+3. Open the app in a browser at:
+   ```text
+   http://127.0.0.1:5000
+   ```
+
+## Environment variables
+
+You can optionally configure an LLM provider:
+
+```bash
+export LLM_PROVIDER=fallback
+export OPENAI_API_KEY=your_key_here
+# or
+export GEMINI_API_KEY=your_key_here
+```
+
+If no API key is configured, the system uses a safe keyword-based fallback so the app still works immediately.
+
+## Important security and compliance notes
+
+- This application does not bypass CAPTCHAs, MFA, login protection, or anti-bot protections.
+- Authorized auto apply remains disabled until explicitly enabled in the app settings.
+- Any browser automation should only be used on platforms that officially permit it and where the user has confirmed compliance with policy and consent requirements.

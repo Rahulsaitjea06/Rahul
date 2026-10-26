@@ -1,0 +1,200 @@
+templates/settings.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automation Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <div class="container nav">
+            <h1>Automation Settings</h1>
+            <nav>
+                <a href="{{ url_for('index') }}">Dashboard</a>
+                <a href="{{ url_for('resume_dashboard') }}">Resume</a>
+                <a href="{{ url_for('jobs_page') }}">Jobs</a>
+                <a href="{{ url_for('applications_page') }}">Applications</a>
+                <a href="{{ url_for('settings_page') }}">Automation</a>
+            </nav>
+        </div>
+    </header>
+    <main class="container main">
+        <section class="card">
+            <h3>Automation permissions</h3>
+            <form method="POST" class="form-grid">
+                <label class="checkbox-row">
+                    <input type="checkbox" name="enabled" {% if settings.enabled %}checked{% endif %}>
+                    Enable authorized auto apply
+                </label>
+                <label>Allowed platforms / workflows<textarea name="allowed_platforms">{{ settings.allowed_platforms or '' }}</textarea></label>
+                <label class="checkbox-row">
+                    <input type="checkbox" name="require_confirmation" {% if settings.require_confirmation %}checked{% endif %}>
+                    Require confirmation before submission
+                </label>
+                <button type="submit">Save settings</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

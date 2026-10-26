@@ -1,0 +1,233 @@
+templates/job_detail.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ job.title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <div class="container nav">
+            <h1>{{ job.company }}</h1>
+            <nav>
+                <a href="{{ url_for('index') }}">Dashboard</a>
+                <a href="{{ url_for('resume_dashboard') }}">Resume</a>
+                <a href="{{ url_for('jobs_page') }}">Jobs</a>
+                <a href="{{ url_for('applications_page') }}">Applications</a>
+                <a href="{{ url_for('settings_page') }}">Automation</a>
+            </nav>
+        </div>
+    </header>
+    <main class="container main">
+        <section class="card summary-box">
+            <div class="summary-header">
+                <div>
+                    <h2>{{ job.title }}</h2>
+                    <p>{{ job.company }} · {{ job.location }} · {{ job.remote_type }}</p>
+                </div>
+                <div class="score-box">
+                    <strong>{{ match.score }}%</strong>
+                    <span>Match score</span>
+                </div>
+            </div>
+            <div class="meta-row">
+                <span>{{ job.experience_level }}</span>
+                <span>{{ job.employment_type }}</span>
+                <span>{{ job.salary }}</span>
+                <span>{{ job.posted_date }}</span>
+            </div>
+            <p>{{ job.description }}</p>
+            <p><strong>Requirements:</strong> {{ job.requirements }}</p>
+            {% if job.application_url %}
+            <a class="btn-link" href="{{ job.application_url }}" target="_blank" rel="noopener">Open official application page</a>
+            {% endif %}
+        </section>
+
+        <section class="card">
+            <h3>AI job match</h3>
+            <div class="split-grid">
+                <div>
+                    <strong>Matching skills</strong>
+                    <ul>
+                        {% if match.matching_skills %}
+                            {% for item in match.matching_skills %}
+                            <li>{{ item }}</li>
+                            {% endfor %}
+                        {% else %}
+                            <li>No direct keyword overlap detected, but the role may still be relevant based on transferable skills.</li>
+                        {% endif %}
+                    </ul>
+                </div>
+                <div>
+                    <strong>Missing or unverified skills</strong>
+                    <ul>
+                        {% if match.missing_skills %}
+                            {% for item in match.missing_skills %}
+                            <li>{{ item }}</li>
+                            {% endfor %}
+                        {% else %}
+                            <li>No major missing skills identified from the available profile summary.</li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+
+            <strong>Why this role is suitable</strong>
+            <ul>
+                {% for item in match.reasons %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+
+            <strong>Recommended improvements</strong>
+            <ul>
+                {% for item in match.improvements %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <section class="card">
+            <h3>Generated cover letter</h3>
+            <pre>{{ cover_letter }}</pre>
+        </section>
+
+        <section class="card">
+            <h3>Application mode</h3>
+            <form method="POST" action="{{ url_for('apply_to_job', job_id=job.id) }}" class="form-grid compact">
+                <select name="mode">
+                    <option value="manual">Manual Apply</option>
+                    <option value="assisted">Assisted Apply</option>
+                    <option value="authorized">Authorized Auto Apply</option>
+                </select>
+                <button type="submit">Record application</button>
+            </form>
+            <p><small>Authorized auto apply stays disabled until the automation feature is explicitly enabled in settings.</small></p>
+        </section>
+    </main>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
